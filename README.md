@@ -61,7 +61,7 @@ You must download the dataset manually and place it inside the project folder.
 ### ➜ Download Dataset
 
 ```
-[ https://www.kaggle.com/datasets/andrewmvd/metastatic-tissue-classification-patchcamelyon ]
+https://www.kaggle.com/datasets/andrewmvd/metastatic-tissue-classification-patchcamelyon
 ```
 
 ### ➜ Required Folder Structure
