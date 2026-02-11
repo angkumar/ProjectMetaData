@@ -92,7 +92,7 @@ If filenames differ, update file paths inside the training script.
 Run:
 
 ```
-python3 Model/train_model.py
+python3 Model/cancer_detector.py
 ```
 
 Training pipeline:
@@ -136,11 +136,10 @@ ProjectMetaData/
 │
 ├── Model/
 │   ├── dataset_loader.py
-│   ├── training_pipeline.py
-│   └── checkpoint_utils.py
+│   ├── Cancer_Detector.py
+│   └── upload.py
 │
 ├── Training_Data/
-├── ONCO_SCAN_GUI.py
 └── README.md
 ```
 
