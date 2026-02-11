@@ -3,67 +3,75 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
-import os
 import h5py
 
-def save_checkpoint(model, optimizer, epoch, loss, path="Cancter_Detector.pt"):
-    torch.save({
-        "epoch": epoch,
-        "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": optimizer.state_dict(),
-        "loss": loss,
-    }, path)
-
-def load_checkpoint(model, optimizer, path="Cancter_Detector.pt"):
-    if not os.path.exists(path):
-        print("No checkpoint found, starting fresh")
-        return 0
-    checkpoint = torch.load(path, map_location="cpu")
-    model.load_state_dict(checkpoint["model_state_dict"])
-    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-    start_epoch = checkpoint["epoch"] + 1
-    print(f"Resumed from epoch {start_epoch}, last loss: {checkpoint['loss']:.4f}")
-    return start_epoch
-
 class H5CancerDataset(Dataset):
-    def __init__(self, images_h5_path, labels_h5_path, transform=None,
-                 image_key="x", label_key="y"):
+    def __init__(
+        self,
+        images_h5_path: str,
+        labels_h5_path: str,
+        transform=None,
+        image_key: str = "x",
+        label_key: str = "y",
+    ):
+        """
+        images_h5_path: .h5 file containing images under key `image_key` (default: 'x')
+        labels_h5_path: .h5 file containing labels under key `label_key` (default: 'y')
+        """
+
         self.transform = transform
         self.images_h5_path = images_h5_path
         self.labels_h5_path = labels_h5_path
         self.image_key = image_key
         self.label_key = label_key
+
+        # Lazy-open per process/worker (safer with DataLoader workers).
         self._images_h5 = None
         self._labels_h5 = None
+        self.images = None
+        self.labels = None
 
-        with h5py.File(self.images_h5_path, "r") as f:
-            self._length = int(f[self.image_key].shape[0])
-        with h5py.File(self.labels_h5_path, "r") as f:
-            lbl_len = int(f[self.label_key].shape[0])
+        # Cache length + validate alignment.
+        with h5py.File(self.images_h5_path, "r") as f_img:
+            self._length = int(f_img[self.image_key].shape[0])
+        with h5py.File(self.labels_h5_path, "r") as f_lbl:
+            lbl_len = int(f_lbl[self.label_key].shape[0])
         if lbl_len != self._length:
-            raise ValueError(f"Image/label length mismatch: {self._length} vs {lbl_len}")
+            raise ValueError(
+                f"Image/label length mismatch: images={self._length}, labels={lbl_len}"
+            )
 
     def _ensure_open(self):
         if self._images_h5 is None:
-            self._images_h5 = h5py.File(self.images_h5_path, "r", swmr=True)
-            self._images = self._images_h5[self.image_key]
+            self._images_h5 = h5py.File(self.images_h5_path, "r")
+            self.images = self._images_h5[self.image_key]
         if self._labels_h5 is None:
-            self._labels_h5 = h5py.File(self.labels_h5_path, "r", swmr=True)
-            self._labels = self._labels_h5[self.label_key]
+            self._labels_h5 = h5py.File(self.labels_h5_path, "r")
+            self.labels = self._labels_h5[self.label_key]
 
     def __len__(self):
         return self._length
 
     def __getitem__(self, idx):
         self._ensure_open()
-        img = torch.tensor(self._images[idx], dtype=torch.float32) / 255.0
-        img = img.permute(2, 0, 1)
+        # (96,96,3) uint8
+        img = self.images[idx]
+
+        # Convert to float tensor + normalize
+        img = torch.tensor(img, dtype=torch.float32) / 255.0
+        img = img.permute(2, 0, 1)  # HWC -> CHW
+
         if self.transform:
             img = self.transform(img)
-        label = torch.tensor(int(self._labels[idx].squeeze()), dtype=torch.long)
+
+        # Labels are stored as (1,1,1) uint8; convert to scalar int64 class id.
+        label_value = int(self.labels[idx].squeeze())
+        label = torch.tensor(label_value, dtype=torch.long)
+
         return img, label
 
     def close(self):
+        # Defensive close: during interpreter shutdown, h5py may already be partially torn down.
         for attr in ("_images_h5", "_labels_h5"):
             f = getattr(self, attr, None)
             if f is not None:
@@ -76,10 +84,26 @@ class H5CancerDataset(Dataset):
     def __del__(self):
         self.close()
 
+
+# -------------------------
+# 2. Lightweight Augmentation
+# -------------------------
+transform = transforms.Compose([
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomVerticalFlip(),
+])
+
+
+# -------------------------
+# 3. CNN Model (FROM SCRATCH)
+# Input size = 96x96
+# After 3 pools -> 12x12 feature map
+# -------------------------
 class CancerCNN(nn.Module):
     def __init__(self, num_classes, metadata_features=0):
         super().__init__()
 
+        # Image branch
         self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
         self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
@@ -87,8 +111,10 @@ class CancerCNN(nn.Module):
         self.pool = nn.MaxPool2d(2,2)
         self.dropout = nn.Dropout(0.3)
 
+        # 96 -> 48 -> 24 -> 12
         self.flattened_size = 128 * 12 * 12
 
+        # Metadata branch
         if metadata_features > 0:
             self.meta_fc = nn.Sequential(
                 nn.Linear(metadata_features, 32),
@@ -99,6 +125,7 @@ class CancerCNN(nn.Module):
         else:
             combined_size = self.flattened_size
 
+        # Final classifier
         self.fc = nn.Sequential(
             nn.Linear(combined_size, 256),
             nn.ReLU(),
@@ -131,21 +158,25 @@ class CancerCNN(nn.Module):
         out = self.fc(x)
         return out
 
+
+# -------------------------
+# 4. Training Loop
+# -------------------------
 def train_model(model, train_loader, val_loader=None, num_epochs=50, lr=1e-3, device="mps"):
+
     device = torch.device(device if torch.backends.mps.is_available() else "cpu")
     model.to(device)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    # resume if checkpoint exists
-    start_epoch = load_checkpoint(model, optimizer)
+    for epoch in range(num_epochs):
 
-    for epoch in range(start_epoch, start_epoch + num_epochs):
         model.train()
         running_loss = 0.0
 
-        for batch_idx, batch in enumerate(train_loader):
+        for batch in train_loader:
+
             if len(batch) == 3:
                 images, meta, labels = batch
                 images, meta, labels = images.to(device), meta.to(device), labels.to(device)
@@ -159,22 +190,18 @@ def train_model(model, train_loader, val_loader=None, num_epochs=50, lr=1e-3, de
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
+
             running_loss += loss.item()
 
-            if batch_idx % 50 == 0:
-                print(f"  Batch {batch_idx}/{len(train_loader)}, Loss: {loss.item():.4f}")
-
         avg_loss = running_loss / len(train_loader)
-        print(f"Epoch [{epoch+1}] Loss: {avg_loss:.4f}")
+        print(f"Epoch [{epoch+1}/{num_epochs}] Loss: {avg_loss:.4f}")
 
-        # save after every epoch
-        save_checkpoint(model, optimizer, epoch, avg_loss)
-        print(f"Checkpoint saved at epoch {epoch+1}")
-
+        # Validation
         if val_loader:
             model.eval()
             correct = 0
             total = 0
+
             with torch.no_grad():
                 for batch in val_loader:
                     if len(batch) == 3:
@@ -185,46 +212,33 @@ def train_model(model, train_loader, val_loader=None, num_epochs=50, lr=1e-3, de
                         images, labels = batch
                         images, labels = images.to(device), labels.to(device)
                         outputs = model(images)
+
                     _, predicted = torch.max(outputs.data, 1)
                     total += labels.size(0)
                     correct += (predicted == labels).sum().item()
+
             val_acc = 100 * correct / total
             print(f"Validation Accuracy: {val_acc:.2f}%")
 
+
+# -------------------------
+# 5. Example Usage
+# -------------------------
 if __name__ == "__main__":
-    train_dataset = H5CancerDataset(
-        images_h5_path="Training_Data/pcam/training_split.h5",
-        labels_h5_path="Training_Data/Labels/camelyonpatch_level_2_split_train_y.h5",
-        transform=transforms.Compose([
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomVerticalFlip(),
-        ]),
+    test_dataset = H5CancerDataset(
+        images_h5_path="Training_Data/pcam/test_split.h5",
+        labels_h5_path="Training_Data/Labels/camelyonpatch_level_2_split_test_y.h5",
+        transform=transform,
     )
 
-    print(f"MPS available: {torch.backends.mps.is_available()}")
-    print(f"MPS built: {torch.backends.mps.is_built()}")
-    print(f"Using device: {'mps' if torch.backends.mps.is_available() else 'cpu'}")
+    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=0)
 
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=64,
-        shuffle=True,
-        num_workers=2,       # 2 is safer than 4 on 8GB
-        pin_memory=False,
-        persistent_workers=True,
-        prefetch_factor=2    # each worker pre-loads 2 batches ahead
-    )
+    images, labels = next(iter(test_loader))
+    print("Batch images:", images.shape, images.dtype)
+    print("Batch labels:", labels.shape, labels.dtype, "unique:", labels.unique().tolist())
 
+    # Example model (binary classification for PCam labels 0/1)
     model = CancerCNN(num_classes=2, metadata_features=0)
+    # train_model(model, train_loader=test_loader, val_loader=None, num_epochs=1, lr=1e-3, device="mps")
 
-    train_model(
-        model,
-        train_loader,
-        val_loader=None,
-        num_epochs=10,   # change as you like
-        lr=1e-3,
-        device="mps",
-    )
 
-    torch.save(model.state_dict(), "Cancter_Detector.pt")
-    print("Model saved to Cancter_Detector.pt")
