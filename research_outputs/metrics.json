@@ -1,0 +1,17 @@
+{
+    "test_samples": 32768,
+    "accuracy": 0.783233642578125,
+    "precision": 0.8498566470499472,
+    "recall": 0.6877938572388105,
+    "sensitivity": 0.6877938572388105,
+    "specificity": 0.878591910194619,
+    "f1_score": 0.7602848368262968,
+    "auc_roc": 0.8641043299478,
+    "auc_pr": 0.8811910464812573,
+    "true_positives": 11264,
+    "true_negatives": 14401,
+    "false_positives": 1990,
+    "false_negatives": 5113,
+    "false_positive_rate": 0.12140808980538101,
+    "false_negative_rate": 0.31220614276118946
+}

@@ -6,46 +6,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import transforms
 from PIL import Image, ImageTk, ImageDraw, ImageFilter
+from Cancer_Detector import CancerCNN
 import numpy as np
 import os
 import math
 import time
-
-# ─── Model Definition ────────────────────────────────────────────────────────
-
-class CancerCNN(nn.Module):
-    def __init__(self, num_classes, metadata_features=0):
-        super().__init__()
-        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.dropout = nn.Dropout(0.3)
-        self.flattened_size = 128 * 12 * 12
-        combined_size = self.flattened_size
-        self.fc = nn.Sequential(
-            nn.Linear(combined_size, 256),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(256, num_classes)
-        )
-        self.metadata_features = metadata_features
-
-    def forward(self, x, meta=None):
-        x = F.relu(self.conv1(x))
-        x = self.pool(x)
-        x = self.dropout(x)
-        x = F.relu(self.conv2(x))
-        x = self.pool(x)
-        x = self.dropout(x)
-        x = F.relu(self.conv3(x))
-        x = self.pool(x)
-        x = self.dropout(x)
-        x = x.view(x.size(0), -1)
-        return self.fc(x)
-
-
-# ─── Inference ───────────────────────────────────────────────────────────────
 
 def load_model(model_path):
     model = CancerCNN(num_classes=2)
@@ -341,7 +306,7 @@ class App(tk.Tk):
         self.verdict_frame = tk.Frame(right, bg="#080c14",
                                       highlightbackground=BORDER,
                                       highlightthickness=1)
-        self.verdict_frame.place(x=20, y=34, width=360, height=130)
+        self.verdict_frame.place(x=50, y=34, width=360, height=130)
 
         self.verdict_icon = tk.Label(
             self.verdict_frame, text="◈", font=(FONT_MONO, 36),

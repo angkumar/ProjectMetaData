@@ -1,0 +1,40 @@
+============================================================
+CANCER DETECTION MODEL - RESEARCH SUMMARY
+============================================================
+Generated: 2026-02-16 21:14:35
+
+TEST SET PERFORMANCE
+------------------------------------------------------------
+Total Test Samples: 32,768
+
+PRIMARY METRICS:
+  Accuracy:    0.7832 (78.32%)
+  Sensitivity: 0.6878 (68.78%)
+  Specificity: 0.8786 (87.86%)
+  Precision:   0.8499 (84.99%)
+  F1-Score:    0.7603
+  AUC-ROC:     0.8641
+  AUC-PR:      0.8812
+
+CONFUSION MATRIX:
+  True Positives:  11,264
+  True Negatives:  14,401
+  False Positives: 1,990
+  False Negatives: 5,113
+
+ERROR RATES:
+  False Positive Rate: 0.1214 (12.14%)
+  False Negative Rate: 0.3122 (31.22%)
+
+CLINICAL INTERPRETATION:
+------------------------------------------------------------
+Sensitivity of 68.8% means the model correctly
+identifies 68.8% of cancer cases.
+
+Specificity of 87.9% means the model correctly
+identifies 87.9% of healthy tissue samples.
+
+False negative rate of 31.2% means
+5,113 cancer cases were missed.
+
+============================================================
